@@ -1,0 +1,9 @@
+<?xml version="1.0" ?>
+<!DOCTYPE svg  PUBLIC "-//W3C//DTD SVG 1.1//EN"
+    "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd" [
+    <!ENTITY stroke_color "#010101">
+    <!ENTITY fill_color "#FFFFFF">
+    ]>
+<svg height="55px" viewBox="0 0 55 55" width="55px" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <path d="m 7,14 5,-5 10,0 5,5 20,0 0,31 -40,0 z" style="fill:&fill_color;;stroke:&stroke_color;;stroke-width:3;stroke-linecap:round;stroke-linejoin:round" />
+</svg>

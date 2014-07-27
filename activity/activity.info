@@ -1,0 +1,7 @@
+[Activity]
+name = Amicus IDE
+activity_version = 1
+bundle_id = org.laboratorios.azucar.Amicuside
+exec = sugar-activity activity.Abominade
+icon = activity
+license = GPLv3+
