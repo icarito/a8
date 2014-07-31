@@ -3,11 +3,13 @@
 # vim: ft=python sw=2 ts=2 sts=2 tw=80
 
 import gtk
+from pygtkhelpers.delegates import SlaveView
 import gobject
 import sys
 from sugar.activity import activity
 from sugar.graphics.toolbarbox import ToolbarBox
 from sugar.graphics.toolbutton import ToolButton
+from sugar.graphics.toggletoolbutton import ToggleToolButton
 from sugar.activity.widgets import ActivityButton
 from sugar.activity.widgets import ActivityToolbox
 from sugar.activity.widgets import TitleEntry
@@ -15,44 +17,92 @@ from sugar.activity.widgets import StopButton
 from sugar.activity.widgets import ShareButton
 from console.interactiveconsole import GTKInterpreterConsole
 
-"""Abominade Monolith."""
 
 import collections
-import argparse
 import os
 
 from a8 import (terminals, files, buffers, vimembed, window, config, bookmarks,
                 shortcuts, extensions, sessions)
 
-class Abominade(activity.Activity):
+class Abominade(object):
   """Abominade Monolith"""
 
-  def __init__(self, handle):
-    """Set up the activity."""
-    activity.Activity.__init__(self, handle)
+  args = []
+
+  def __init__(self, activity):
     self.signals = collections.defaultdict(list)
     self.home = config.InstanceDirectory()
     self.config = self.home.load_config()
-    self.parse_args()
-    if self.args.directory:
-      os.chdir(self.args.directory)
     self.shortcuts = shortcuts.ShortcutManager(self)
     self.files = files.FileManager(self)
     self.buffers = buffers.BufferManager(self)
     self.terminals = terminals.TerminalManager(self)
     self.bookmarks = bookmarks.BookmarkManager(self)
     self.vim = vimembed.VimManager(self)
-    self.ui = window.ApplicationWindow(self)
-    self.ui.widget.maximize()
+    self.ui = activity
+    extensions.load_extensions(self)
+
     # do this after show so the window appears after abominade in launcher
     if self.config['terminal_window']:
       self.terminals.popinout()
     self.sessions = sessions.SessionManager(self)
     self.sessions.start()
-    extensions.load_extensions(self)
+
+  def start(self):
+    """Start a8"""
+    self.vim.start()
+    self.files.browse()
     extensions.load_extension(self, "sugar-theme")
-    gobject.timeout_add(1000, self.init_interpreter)
-    #self.init_interpreter()
+
+  def stop(self):
+    """Stop a8"""
+    self.sessions.save_session(polite=False)
+    self.vim.stop()
+    self.terminals.stop()
+
+  def emit(self, signal, **kw):
+    for callback in self.signals[signal]:
+      callback(**kw)
+
+  def connect(self, signal, callback):
+    self.signals[signal].append(callback)
+
+class AbominadeActivity(activity.Activity):
+  """Abominade Monolith"""
+
+  def __init__(self, handle):
+    """Set up the activity."""
+    activity.Activity.__init__(self, handle)
+
+    """Create the user interface."""
+    self.stack = gtk.VBox()
+    self.add(self.stack)
+    self.hpaned = gtk.HPaned()
+    self.stack.pack_end(self.hpaned)
+    self.vpaned = gtk.VPaned()
+    self.hpaned.pack2(self.vpaned, shrink=False)
+    self.hpaned.set_position(200)
+    self.plugins = window.PluginTabs()
+    self.hpaned.pack1(self.plugins.widget, shrink=False)
+
+    self.model = Abominade(self)
+
+    self.plugins.add_main(self.model.buffers)
+    self.plugins.add_tab(self.model.files)
+    self.plugins.add_tab(self.model.bookmarks)
+    self.plugins.add_tab(self.model.terminals)
+    self.vpaned.pack1(self.model.vim.widget, resize=True, shrink=False)
+    self.vpaned.pack2(self.model.terminals.book, resize=False, shrink=False)
+    # make sure buffers list isn't zero-height
+    if self.plugins.stack.get_position() < 200:
+      self.plugins.stack.set_position(200)
+    
+    self.stack.show_all()
+    self.set_canvas(self.stack)
+
+    self.init_interpreter()
+    label = gtk.Label("Consola")
+    self.model.terminals.book.prepend_page(self.interpreter, tab_label=label)
 
     # we do not have collaboration features
     # make the share option insensitive
@@ -69,12 +119,21 @@ class Abominade(activity.Activity):
     toolbar_box.toolbar.insert(title_entry, -1)
     title_entry.show()
 
-    self.editor_button = ToolButton('sources')
-    self.editor_button.set_tooltip('Consola')
-    self.editor_button.accelerator = "<Ctrl>grave"
-    self.editor_button.connect('clicked', self.toggle_console)
-    toolbar_box.toolbar.insert(self.editor_button, -1)
-    self.editor_button.show()
+    self.sidebar_button = ToggleToolButton('folder')
+    self.sidebar_button.set_active(True)
+    self.sidebar_button.set_tooltip('Consola')
+    self.sidebar_button.accelerator = "<Ctrl>grave"
+    self.sidebar_button.connect('clicked', self.toggle_sidebar)
+    toolbar_box.toolbar.insert(self.sidebar_button, -1)
+    self.sidebar_button.show()
+
+    self.bottom_button = ToggleToolButton('tray-show')
+    self.bottom_button.set_active(True)
+    self.bottom_button.set_tooltip('Consola')
+    self.bottom_button.accelerator = "<Ctrl>grave"
+    self.bottom_button.connect('clicked', self.toggle_bottom)
+    toolbar_box.toolbar.insert(self.bottom_button, -1)
+    self.bottom_button.show()
 
     share_button = ShareButton(self)
     toolbar_box.toolbar.insert(share_button, -1)
@@ -93,26 +152,41 @@ class Abominade(activity.Activity):
     self.set_toolbar_box(toolbar_box)
     toolbar_box.show()
 
-  def toggle_console(self, e):
-    if self._interpreter.props.visible:
-      self._interpreter.hide()
-    else:
-      self._interpreter.show()
-      self._interpreter.text.grab_focus()
+    self.model.start()
 
-  def toggle_sidebar(self, e):
-    if self._interpreter.props.visible:
-      self._interpreter.hide()
-    else:
-      self._interpreter.show()
-      self._interpreter.text.grab_focus()
+  def on_widget__delete_event(self, window, event):
+    self.stop()
+    return True
 
-  def redraw(self):
-    pass
+  def focus_files(self):
+    self.plugins.focus_delegate(self.model.files)
+
+  def focus_bookmarks(self):
+    self.plugins.focus_delegate(self.model.bookmarks)
+
+  def focus_terminals(self):
+    self.plugins.focus_delegate(self.model.terminals)
+
+  def focus_buffers(self):
+    self.buffers.items.grab_focus()
 
   def focus_interpreter(self, widget, event):
-    self._interpreter.text.grab_focus()
+    self.interpreter.text.grab_focus()
     return True
+
+  def toggle_bottom(self, e):
+    bottom = self.vpaned.get_child2()
+    if bottom.props.visible:
+      bottom.hide()
+    else:
+      bottom.show()
+
+  def toggle_sidebar(self, e):
+    sidebar = self.hpaned.get_child1()
+    if sidebar.props.visible:
+      sidebar.hide()
+    else:
+      sidebar.show()
 
   def init_interpreter(self):
     # diferido unos segundos para evitar ver errores superfluos al iniciar
@@ -120,62 +194,8 @@ class Abominade(activity.Activity):
         raise None
     except:
         frame = sys.exc_info()[2].tb_frame
-    self._interpreter = GTKInterpreterConsole(self.redraw, frame)
-    self._interpreter.text.connect('button-press-event', self.focus_interpreter)
-    self._interpreter.show()
-    vbox = self.ui.widget.get_children()[0]
-    newpaned = gtk.VPaned()
-    newbox = gtk.HBox()
-    vbox.reparent(newbox)
-    newbox.show()
-    newpaned.pack1(self._interpreter)
-    newpaned.pack2(newbox)
-    newpaned.show()
-    self.set_canvas(newpaned)
-    #self.set_canvas(vbox)
-    self.start()
-    self.ui.hide()
+    self.interpreter = GTKInterpreterConsole(frame)
+    self.interpreter.text.connect('button-press-event', self.focus_interpreter)
+    self.interpreter.show()
     return False
 
-  def parse_args(self):
-    parser = argparse.ArgumentParser()
-    parser.add_argument('-d', '--directory', help='Working directory to start in.')
-    parser.add_argument('files', nargs='*', help='Files to open.')
-    parser.add_argument('-s', '--session', action='store',
-        choices=('user', 'local', 'none'),
-        default=None,
-        help='Maintain session per-user, per-working-dir, or no session.')
-    parser.add_argument('--no-session', action='store_const', dest='session',
-        const='none', help='Alias for --session=none.')
-    parser.add_argument('--show-toolbar', action='store_true')
-    parser.add_argument('-b')
-    parser.add_argument('-a')
-    parser.add_argument('-o')
-    self.args = parser.parse_args()
-    if self.args.session is not None:
-      self.config.opts['session_type'] = self.args.session
-    if self.args.show_toolbar:
-      self.config.opts['toolbar'] = True
-
-  def can_close(self):
-    self.stop()
-    return True
-
-  def start(self):
-    """Start a8"""
-    self.vim.start()
-    self.files.browse()
-    self.ui.start()
-
-  def stop(self):
-    """Stop a8"""
-    self.sessions.save_session(polite=False)
-    self.vim.stop()
-    self.terminals.stop()
-
-  def emit(self, signal, **kw):
-    for callback in self.signals[signal]:
-      callback(**kw)
-
-  #def connect(self, signal, callback):
-  #  self.signals[signal].append(callback)

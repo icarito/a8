@@ -22,8 +22,6 @@ banner = """Taller de Artesano de Videojuegos
 Python %s
 """ % sys.version
 
-banner += "Explore self.game.\n"
-
 class Completer:
   """
   Taken from rlcompleter, with readline references stripped, and a local dictionary to use.
@@ -133,7 +131,7 @@ class GTKInterpreterConsole(gtk.ScrolledWindow):
   An InteractiveConsole for GTK. It's an actual widget,
   so it can be dropped in just about anywhere.
   """
-  def __init__(self, callback, frame):
+  def __init__(self, frame, callback=None):
     gtk.ScrolledWindow.__init__(self)
     self.set_policy (gtk.POLICY_AUTOMATIC,gtk.POLICY_AUTOMATIC)
 
@@ -317,7 +315,8 @@ class GTKInterpreterConsole(gtk.ScrolledWindow):
 
     self.current_history = 0
 
-    self.callback()
+    if self.callback:
+        self.callback()
     return gtk.TRUE
 
   def complete_line(self):
